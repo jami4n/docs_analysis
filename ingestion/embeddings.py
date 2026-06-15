@@ -1,21 +1,42 @@
 """
 embeddings.py
 
-Creates the Google embedding model.
-This model converts text chunks into vectors for FAISS.
+Creates Google embedding model for FAISS.
+Works locally with .env and on Streamlit Cloud with st.secrets.
 """
 
+import os
+import streamlit as st
+from dotenv import load_dotenv
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
+
+def get_google_api_key():
+    """
+    Get API key from either:
+    1. Streamlit Cloud secrets
+    2. Local .env file
+    """
+
+    load_dotenv()
+
+    if "GOOGLE_API_KEY" in st.secrets:
+        return st.secrets["GOOGLE_API_KEY"]
+
+    return os.getenv("GOOGLE_API_KEY")
 
 
 def get_embedding_model():
     """
-    Return the embedding model.
-
-    We use gemini-embedding-001 because text-embedding-004
-    may not be available for your Gemini API version/account.
+    Create the Gemini embedding model.
     """
 
+    api_key = get_google_api_key()
+
+    if not api_key:
+        raise ValueError("GOOGLE_API_KEY not found in Streamlit secrets or .env")
+
     return GoogleGenerativeAIEmbeddings(
-        model="models/gemini-embedding-001"
+        model="models/gemini-embedding-001",
+        google_api_key=api_key,
     )
