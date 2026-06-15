@@ -1,0 +1,9 @@
+streamlit
+markitdown[all]
+python-dotenv
+google-genai
+langchain-google-genai
+langchain-community
+langchain-text-splitters
+langchain-core
+faiss-cpu
