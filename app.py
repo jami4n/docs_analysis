@@ -165,6 +165,15 @@ st.sidebar.write(
     f"Cost: ${st.session_state.session_cost:.6f}"
 )
 
+st.sidebar.subheader(
+    "Current Settings"
+)
+
+st.sidebar.write("TOP_K = 4")
+st.sidebar.write("MAX_HISTORY = 7")
+st.sidebar.write("Chunk Size = 1200")
+st.sidebar.write("Chunk Overlap = 200")
+
 # --------------------------------------------------
 # Upload Files
 # --------------------------------------------------
