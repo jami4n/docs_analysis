@@ -30,8 +30,11 @@ def get_google_api_key():
 
     load_dotenv()
 
-    if "GOOGLE_API_KEY" in st.secrets:
-        return st.secrets["GOOGLE_API_KEY"]
+    try:
+        if "GOOGLE_API_KEY" in st.secrets:
+            return st.secrets["GOOGLE_API_KEY"]
+    except Exception:
+        pass
 
     return os.getenv("GOOGLE_API_KEY")
 

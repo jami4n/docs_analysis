@@ -60,6 +60,14 @@ st.set_page_config(
 
 st.title("📚 Document Research Workbench")
 
+# --------------------------------------------------
+# Main Layout
+# --------------------------------------------------
+# left_col = main app area
+# right_col = chat history panel
+
+left_col, right_col = st.columns([3, 1])
+
 
 # --------------------------------------------------
 # Constants
@@ -133,6 +141,11 @@ if st.sidebar.button("Clear Session"):
     st.session_state.documents = []
     st.session_state.all_chunks = []
     st.session_state.vector_store = None
+    st.session_state.chat_messages = []
+    st.session_state.session_prompt_tokens = 0
+    st.session_state.session_completion_tokens = 0
+    st.session_state.session_total_tokens = 0
+    st.session_state.session_cost = 0
     st.success("Session cleared.")
 
 if st.session_state.documents:
@@ -178,546 +191,577 @@ st.sidebar.write("Chunk Overlap = 200")
 # Upload Files
 # --------------------------------------------------
 
-uploaded_files = st.file_uploader(
-    "Upload one or more documents",
-    type=[
-        "pdf",
-        "docx",
-        "pptx",
-        "xlsx",
-        "txt",
-        "html",
-        "md",
-    ],
-    accept_multiple_files=True,
-)
+with left_col:
+    # your existing upload + question + response UI here
+    uploaded_files = st.file_uploader(
+        "Upload one or more documents",
+        type=[
+            "pdf",
+            "docx",
+            "pptx",
+            "xlsx",
+            "txt",
+            "html",
+            "md",
+        ],
+        accept_multiple_files=True,
+    )
 
 
-# --------------------------------------------------
-# Process Uploaded Files
-# --------------------------------------------------
+    # --------------------------------------------------
+    # Process Uploaded Files
+    # --------------------------------------------------
 
-if uploaded_files:
+    if uploaded_files:
 
-    for uploaded_file in uploaded_files:
+        for uploaded_file in uploaded_files:
 
-        # Check if file already exists in this session
-        already_loaded = any(
-            doc["file_name"] == uploaded_file.name
-            for doc in st.session_state.documents
-        )
+            # Check if file already exists in this session
+            already_loaded = any(
+                doc["file_name"] == uploaded_file.name
+                for doc in st.session_state.documents
+            )
 
-        if already_loaded:
-            st.warning(f"{uploaded_file.name} is already loaded. Skipping.")
-            continue
+            if already_loaded:
+                st.warning(f"{uploaded_file.name} is already loaded. Skipping.")
+                continue
 
-        # Save uploaded file locally
-        file_path = os.path.join("uploads", uploaded_file.name)
+            # Save uploaded file locally
+            file_path = os.path.join("uploads", uploaded_file.name)
 
-        with open(file_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
 
-        st.success(f"Uploaded: {uploaded_file.name}")
-
-
-        # --------------------------------------------------
-        # Step 1: Convert document to markdown
-        # --------------------------------------------------
-
-        markdown_start_time = time.time()
-
-        markdown_text = convert_to_markdown(file_path)
-
-        markdown_time = time.time() - markdown_start_time
-
-        if not markdown_text or not markdown_text.strip():
-            st.error(f"No readable markdown found in {uploaded_file.name}. Skipping.")
-            continue
-
-        st.success(
-            f"Converted {uploaded_file.name} to markdown in {markdown_time:.2f}s"
-        )
+            st.success(f"Uploaded: {uploaded_file.name}")
 
 
-        # --------------------------------------------------
-        # Step 2: Chunk markdown
-        # --------------------------------------------------
+            # --------------------------------------------------
+            # Step 1: Convert document to markdown
+            # --------------------------------------------------
 
-        chunk_start_time = time.time()
+            markdown_start_time = time.time()
 
-        chunks = chunk_markdown_text(
-            markdown_text=markdown_text,
-            source_file=uploaded_file.name,
-        )
+            markdown_text = convert_to_markdown(file_path)
 
-        chunk_time = time.time() - chunk_start_time
+            markdown_time = time.time() - markdown_start_time
 
-        if len(chunks) == 0:
-            st.error(f"No usable chunks found in {uploaded_file.name}. Skipping.")
-            continue
+            if not markdown_text or not markdown_text.strip():
+                st.error(f"No readable markdown found in {uploaded_file.name}. Skipping.")
+                continue
 
-        st.success(
-            f"Created {len(chunks)} chunks in {chunk_time:.2f}s"
-        )
+            st.success(
+                f"Converted {uploaded_file.name} to markdown in {markdown_time:.2f}s"
+            )
 
 
-        # --------------------------------------------------
-        # Step 3: Convert chunks into LangChain Documents
-        # --------------------------------------------------
+            # --------------------------------------------------
+            # Step 2: Chunk markdown
+            # --------------------------------------------------
 
-        documents = create_documents_from_chunks(chunks)
+            chunk_start_time = time.time()
 
-        if len(documents) == 0:
-            st.error(f"No LangChain documents created for {uploaded_file.name}. Skipping.")
-            continue
+            chunks = chunk_markdown_text(
+                markdown_text=markdown_text,
+                source_file=uploaded_file.name,
+            )
 
+            chunk_time = time.time() - chunk_start_time
 
-        # --------------------------------------------------
-        # Step 4: Embed and store in FAISS
-        # --------------------------------------------------
+            if len(chunks) == 0:
+                st.error(f"No usable chunks found in {uploaded_file.name}. Skipping.")
+                continue
 
-        embedding_start_time = time.time()
-
-        try:
-            if st.session_state.vector_store is None:
-                st.session_state.vector_store = create_faiss_index(
-                    documents,
-                    embedding_model,
-                )
-
-                st.success("Created new FAISS index.")
-
-            else:
-                st.session_state.vector_store = add_to_faiss_index(
-                    st.session_state.vector_store,
-                    documents,
-                )
-
-                st.success("Added document to existing FAISS index.")
-
-        except Exception as e:
-            st.error(f"Embedding or FAISS error: {e}")
-            continue
-
-        embedding_time = time.time() - embedding_start_time
-
-        st.success(
-            f"Embeddings created and stored in {embedding_time:.2f}s"
-        )
+            st.success(
+                f"Created {len(chunks)} chunks in {chunk_time:.2f}s"
+            )
 
 
-        # --------------------------------------------------
-        # Step 5: Save document info in session
-        # --------------------------------------------------
+            # --------------------------------------------------
+            # Step 3: Convert chunks into LangChain Documents
+            # --------------------------------------------------
 
-        st.session_state.documents.append(
-            {
-                "file_name": uploaded_file.name,
-                "markdown": markdown_text,
-                "chunk_count": len(chunks),
-                "markdown_time": markdown_time,
-                "chunk_time": chunk_time,
-                "embedding_time": embedding_time,
-            }
-        )
+            documents = create_documents_from_chunks(chunks)
 
-        st.session_state.all_chunks.extend(chunks)
+            if len(documents) == 0:
+                st.error(f"No LangChain documents created for {uploaded_file.name}. Skipping.")
+                continue
 
 
-# --------------------------------------------------
-# Search / Retrieval Section
-# --------------------------------------------------
+            # --------------------------------------------------
+            # Step 4: Embed and store in FAISS
+            # --------------------------------------------------
 
-st.header("Ask Questions")
+            embedding_start_time = time.time()
 
-question = st.text_input(
-    "Ask a question about the uploaded documents"
-)
+            try:
+                if st.session_state.vector_store is None:
+                    st.session_state.vector_store = create_faiss_index(
+                        documents,
+                        embedding_model,
+                    )
 
-search_clicked = st.button(
-    "Ask Gemini"
-)
+                    st.success("Created new FAISS index.")
 
-if search_clicked:
+                else:
+                    st.session_state.vector_store = add_to_faiss_index(
+                        st.session_state.vector_store,
+                        documents,
+                    )
 
-    cleaned_question = question.strip() if question else ""
+                    st.success("Added document to existing FAISS index.")
 
-    if not cleaned_question:
+            except Exception as e:
+                st.error(f"Embedding or FAISS error: {e}")
+                continue
 
-        st.warning(
-            "Please enter a question."
-        )
+            embedding_time = time.time() - embedding_start_time
 
-    elif st.session_state.vector_store is None:
+            st.success(
+                f"Embeddings created and stored in {embedding_time:.2f}s"
+            )
 
-        st.warning(
-            "Please upload documents first."
-        )
 
-    else:
+            # --------------------------------------------------
+            # Step 5: Save document info in session
+            # --------------------------------------------------
 
-        total_start_time = time.time()
+            st.session_state.documents.append(
+                {
+                    "file_name": uploaded_file.name,
+                    "markdown": markdown_text,
+                    "chunk_count": len(chunks),
+                    "markdown_time": markdown_time,
+                    "chunk_time": chunk_time,
+                    "embedding_time": embedding_time,
+                }
+            )
 
-        # ---------------------------------------
-        # Retrieval
-        # ---------------------------------------
+            st.session_state.all_chunks.extend(chunks)
 
-        retrieval_start = time.time()
 
-        results = retrieve_chunks(
-            vector_store=st.session_state.vector_store,
-            question=cleaned_question,
-            top_k=4
-        )
+    # --------------------------------------------------
+    # Search / Retrieval Section
+    # --------------------------------------------------
 
-        retrieval_time = (
-            time.time()
-            - retrieval_start
-        )
+    st.header("Ask Questions")
 
-        if len(results) == 0:
+    question = st.text_input(
+        "Ask a question about the uploaded documents"
+    )
+
+    search_clicked = st.button(
+        "Ask Gemini"
+    )
+
+    if search_clicked:
+
+        cleaned_question = question.strip() if question else ""
+
+        if not cleaned_question:
 
             st.warning(
-                "No chunks retrieved."
+                "Please enter a question."
+            )
+
+        elif st.session_state.vector_store is None:
+
+            st.warning(
+                "Please upload documents first."
             )
 
         else:
 
-            # ---------------------------------------
-            # Display Retrieved Chunks
-            # ---------------------------------------
-
-            with st.expander(
-                "Retrieved Chunks",
-                expanded=True
-            ):
-
-                for rank, (doc, score) in enumerate(results):
-
-                    st.markdown("---")
-
-                    st.write(
-                        f"### Result {rank+1}"
-                    )
-
-                    st.write(
-                        f"Source: {doc.metadata.get('source_file')}"
-                    )
-
-                    st.write(
-                        f"Chunk ID: {doc.metadata.get('chunk_id')}"
-                    )
-
-                    st.write(
-                        f"Distance Score: {score}"
-                    )
-
-                    st.text_area(
-                        f"Chunk {rank+1}",
-                        doc.page_content,
-                        height=200
-                    )
+            total_start_time = time.time()
 
             # ---------------------------------------
-            # Build Conversation History
+            # Retrieval
             # ---------------------------------------
 
-            trimmed_history = trim_history(
-                st.session_state.chat_messages,
-                max_messages=7
-            )
+            retrieval_start = time.time()
 
-            history_text = (
-                format_conversation_history(
-                    trimmed_history
-                )
-            )
-
-            # ---------------------------------------
-            # Build Prompt
-            # ---------------------------------------
-
-            prompt_start = time.time()
-
-            retrieved_docs = [
-                doc
-                for doc, score
-                in results
-            ]
-
-            prompt = build_prompt(
+            results = retrieve_chunks(
+                vector_store=st.session_state.vector_store,
                 question=cleaned_question,
-                retrieved_chunks=retrieved_docs,
-                conversation_history=history_text
+                top_k=4
             )
 
-            prompt_time = (
+            retrieval_time = (
                 time.time()
-                - prompt_start
+                - retrieval_start
             )
 
-            # ---------------------------------------
-            # Show Prompt
-            # ---------------------------------------
+            if len(results) == 0:
 
-            with st.expander(
-                "Prompt Sent To Gemini",
-                expanded=False
-            ):
-                st.text_area(
-                    "Prompt",
-                    prompt,
-                    height=500
+                st.warning(
+                    "No chunks retrieved."
                 )
 
-            # ---------------------------------------
-            # Gemini Call
-            # ---------------------------------------
+            else:
 
-            llm_start = time.time()
+                # ---------------------------------------
+                # Display Retrieved Chunks
+                # ---------------------------------------
 
-            answer, usage = ask_gemini(
-                prompt
-            )
+                with st.expander(
+                    "Retrieved Chunks",
+                    expanded=True
+                ):
 
-            citations = []
+                    for rank, (doc, score) in enumerate(results):
 
-            for doc in retrieved_docs:
+                        st.markdown("---")
 
-                citation = {
-                    "source_file": doc.metadata.get(
-                        "source_file",
-                        "Unknown"
-                    ),
-                    "chunk_id": doc.metadata.get(
-                        "chunk_id",
-                        "Unknown"
-                    ),
-                    "content": doc.page_content
-                }
+                        st.write(
+                            f"### Result {rank+1}"
+                        )
 
-                citations.append(citation)
+                        st.write(
+                            f"Source: {doc.metadata.get('source_file')}"
+                        )
 
-            prompt_tokens = usage.get(
-                "prompt_tokens",
-                0
-            )
+                        st.write(
+                            f"Chunk ID: {doc.metadata.get('chunk_id')}"
+                        )
 
-            completion_tokens = usage.get(
-                "completion_tokens",
-                0
-            )
+                        st.write(
+                            f"Distance Score: {score}"
+                        )
 
-            total_tokens = usage.get(
-                "total_tokens",
-                0
-            )
+                        st.text_area(
+                            f"Chunk {rank+1}",
+                            doc.page_content,
+                            height=200
+                        )
 
-            request_cost = estimate_gemini_cost(
-                prompt_tokens,
-                completion_tokens
-            )
+                # ---------------------------------------
+                # Build Conversation History
+                # ---------------------------------------
 
-            st.session_state.session_prompt_tokens += (
-                prompt_tokens
-            )
-
-            st.session_state.session_completion_tokens += (
-                completion_tokens
-            )
-
-            st.session_state.session_total_tokens += (
-                total_tokens
-            )
-
-            st.session_state.session_cost += (
-                request_cost
-            )
-
-            with st.expander(
-                "Token Usage",
-                expanded=False
-            ):
-
-                st.write(
-                    f"Prompt Tokens: {prompt_tokens:,}"
+                trimmed_history = trim_history(
+                    st.session_state.chat_messages,
+                    max_messages=7
                 )
 
-                st.write(
-                    f"Completion Tokens: {completion_tokens:,}"
-                )
-
-                st.write(
-                    f"Total Tokens: {total_tokens:,}"
-                )
-
-                st.write(
-                    f"Estimated Cost: ${request_cost:.6f}"
-                )
-
-            llm_time = (
-                time.time()
-                - llm_start
-            )
-
-            # ---------------------------------------
-            # Save History
-            # ---------------------------------------
-
-            st.session_state.chat_messages.append(
-                {
-                    "role": "User",
-                    "content": cleaned_question
-                }
-            )
-
-            st.session_state.chat_messages.append(
-                {
-                    "role": "Assistant",
-                    "content": answer
-                }
-            )
-
-            # ---------------------------------------
-            # Answer
-            # ---------------------------------------
-
-            st.subheader(
-                "Gemini Response"
-            )
-
-            st.write(
-                answer
-            )
-
-            st.markdown("### Sources")
-            unique_sources = set()
-
-            for citation in citations:
-
-                source = citation["source_file"]
-
-                if source not in unique_sources:
-
-                    unique_sources.add(source)
-
-                    st.write(
-                        f"• {source}"
+                history_text = (
+                    format_conversation_history(
+                        trimmed_history
                     )
+                )
 
-            # Citation Viewer
-            with st.expander(
-                "Citations",
-                expanded=False
-            ):
+                # ---------------------------------------
+                # Build Prompt
+                # ---------------------------------------
 
-                for i, citation in enumerate(citations):
+                prompt_start = time.time()
 
-                    st.markdown("---")
+                retrieved_docs = [
+                    doc
+                    for doc, score
+                    in results
+                ]
 
-                    st.write(
-                        f"### Citation {i+1}"
-                    )
+                prompt = build_prompt(
+                    question=cleaned_question,
+                    retrieved_chunks=retrieved_docs,
+                    conversation_history=history_text
+                )
 
-                    st.write(
-                        f"Source File: {citation['source_file']}"
-                    )
+                prompt_time = (
+                    time.time()
+                    - prompt_start
+                )
 
-                    st.write(
-                        f"Chunk ID: {citation['chunk_id']}"
-                    )
+                # ---------------------------------------
+                # Show Prompt
+                # ---------------------------------------
 
+                with st.expander(
+                    "Prompt Sent To Gemini",
+                    expanded=False
+                ):
                     st.text_area(
-                        f"Citation Chunk {i+1}",
-                        citation["content"],
-                        height=250
+                        "Prompt",
+                        prompt,
+                        height=500
                     )
-            
 
-            total_time = (
-                time.time()
-                - total_start_time
-            )
+                # ---------------------------------------
+                # Gemini Call
+                # ---------------------------------------
 
-            # ---------------------------------------
-            # Timing Metrics
-            # ---------------------------------------
+                llm_start = time.time()
 
-            with st.expander(
-                "Timing Metrics"
-            ):
+                answer, usage = ask_gemini(
+                    prompt
+                )
 
-                st.write(
-                    f"Retrieval Time: {retrieval_time:.2f}s"
+                citations = []
+
+                for doc in retrieved_docs:
+
+                    citation = {
+                        "source_file": doc.metadata.get(
+                            "source_file",
+                            "Unknown"
+                        ),
+                        "chunk_id": doc.metadata.get(
+                            "chunk_id",
+                            "Unknown"
+                        ),
+                        "content": doc.page_content
+                    }
+
+                    citations.append(citation)
+
+                prompt_tokens = usage.get(
+                    "prompt_tokens",
+                    0
+                )
+
+                completion_tokens = usage.get(
+                    "completion_tokens",
+                    0
+                )
+
+                total_tokens = usage.get(
+                    "total_tokens",
+                    0
+                )
+
+                request_cost = estimate_gemini_cost(
+                    prompt_tokens,
+                    completion_tokens
+                )
+
+                st.session_state.session_prompt_tokens += (
+                    prompt_tokens
+                )
+
+                st.session_state.session_completion_tokens += (
+                    completion_tokens
+                )
+
+                st.session_state.session_total_tokens += (
+                    total_tokens
+                )
+
+                st.session_state.session_cost += (
+                    request_cost
+                )
+
+                with st.expander(
+                    "Token Usage",
+                    expanded=False
+                ):
+
+                    st.write(
+                        f"Prompt Tokens: {prompt_tokens:,}"
+                    )
+
+                    st.write(
+                        f"Completion Tokens: {completion_tokens:,}"
+                    )
+
+                    st.write(
+                        f"Total Tokens: {total_tokens:,}"
+                    )
+
+                    st.write(
+                        f"Estimated Cost: ${request_cost:.6f}"
+                    )
+
+                llm_time = (
+                    time.time()
+                    - llm_start
+                )
+
+                # ---------------------------------------
+                # Save History
+                # ---------------------------------------
+
+                st.session_state.chat_messages.append(
+                    {
+                        "role": "User",
+                        "content": cleaned_question
+                    }
+                )
+
+                st.session_state.chat_messages.append(
+                    {
+                        "role": "Assistant",
+                        "content": answer
+                    }
+                )
+
+                # ---------------------------------------
+                # Answer
+                # ---------------------------------------
+
+                st.subheader(
+                    "Gemini Response"
                 )
 
                 st.write(
-                    f"Prompt Build Time: {prompt_time:.2f}s"
+                    answer
                 )
+
+                st.markdown("### Sources")
+                unique_sources = set()
+
+                for citation in citations:
+
+                    source = citation["source_file"]
+
+                    if source not in unique_sources:
+
+                        unique_sources.add(source)
+
+                        st.write(
+                            f"• {source}"
+                        )
+
+                # Citation Viewer
+                with st.expander(
+                    "Citations",
+                    expanded=False
+                ):
+
+                    for i, citation in enumerate(citations):
+
+                        st.markdown("---")
+
+                        st.write(
+                            f"### Citation {i+1}"
+                        )
+
+                        st.write(
+                            f"Source File: {citation['source_file']}"
+                        )
+
+                        st.write(
+                            f"Chunk ID: {citation['chunk_id']}"
+                        )
+
+                        st.text_area(
+                            f"Citation Chunk {i+1}",
+                            citation["content"],
+                            height=250
+                        )
+                
+
+                total_time = (
+                    time.time()
+                    - total_start_time
+                )
+
+                # ---------------------------------------
+                # Timing Metrics
+                # ---------------------------------------
+
+                with st.expander(
+                    "Timing Metrics"
+                ):
+
+                    st.write(
+                        f"Retrieval Time: {retrieval_time:.2f}s"
+                    )
+
+                    st.write(
+                        f"Prompt Build Time: {prompt_time:.2f}s"
+                    )
+
+                    st.write(
+                        f"LLM Time: {llm_time:.2f}s"
+                    )
+
+                    st.write(
+                        f"Total Time: {total_time:.2f}s"
+                    )
+
+
+    # --------------------------------------------------
+    # Display Markdown Outputs
+    # --------------------------------------------------
+
+    if st.session_state.documents:
+
+        st.header("Document Outputs")
+
+        for doc in st.session_state.documents:
+
+            with st.expander(f"Markdown Output - {doc['file_name']}"):
+
+                st.write("Processing report:")
 
                 st.write(
-                    f"LLM Time: {llm_time:.2f}s"
+                    f"""
+                    Markdown Time: {doc['markdown_time']:.2f}s
+
+                    Chunking Time: {doc['chunk_time']:.2f}s
+
+                    Embedding Time: {doc['embedding_time']:.2f}s
+
+                    Chunks Created: {doc['chunk_count']}
+                    """
                 )
 
-                st.write(
-                    f"Total Time: {total_time:.2f}s"
+                st.text_area(
+                    label=f"Markdown for {doc['file_name']}",
+                    value=doc["markdown"],
+                    height=400,
                 )
 
 
-# --------------------------------------------------
-# Display Markdown Outputs
-# --------------------------------------------------
+    # --------------------------------------------------
+    # Display Generated Chunks
+    # --------------------------------------------------
 
-if st.session_state.documents:
+    if st.session_state.all_chunks:
 
-    st.header("Document Outputs")
+        with st.expander("Generated Chunks", expanded=False):
 
-    for doc in st.session_state.documents:
+            st.write(f"Total chunks: {len(st.session_state.all_chunks)}")
 
-        with st.expander(f"Markdown Output - {doc['file_name']}"):
+            for chunk in st.session_state.all_chunks:
 
-            st.write("Processing report:")
+                st.markdown("---")
 
-            st.write(
-                f"""
-                Markdown Time: {doc['markdown_time']:.2f}s
+                st.write(f"**Chunk ID:** {chunk['chunk_id']}")
+                st.write(f"**Source File:** {chunk['source_file']}")
+                st.write(f"**Character Count:** {chunk['char_count']}")
 
-                Chunking Time: {doc['chunk_time']:.2f}s
-
-                Embedding Time: {doc['embedding_time']:.2f}s
-
-                Chunks Created: {doc['chunk_count']}
-                """
-            )
-
-            st.text_area(
-                label=f"Markdown for {doc['file_name']}",
-                value=doc["markdown"],
-                height=400,
-            )
-
+                st.text_area(
+                    label=f"Chunk {chunk['chunk_id']}",
+                    value=chunk["text"],
+                    height=200,
+                )
 
 # --------------------------------------------------
-# Display Generated Chunks
+# Right Panel: Chat History
 # --------------------------------------------------
 
-if st.session_state.all_chunks:
+with right_col:
 
-    with st.expander("Generated Chunks", expanded=False):
+    st.header("Chat History")
 
-        st.write(f"Total chunks: {len(st.session_state.all_chunks)}")
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
 
-        for chunk in st.session_state.all_chunks:
+    if not st.session_state.chat_messages:
+        st.info("No chat yet.")
+
+    else:
+        for msg in st.session_state.chat_messages:
+
+            role = msg["role"]
+            content = msg["content"]
+
+            if role == "User":
+                st.markdown("**You**")
+                st.write(content)
+
+            else:
+                st.markdown("**Gemini**")
+                st.write(content)
 
             st.markdown("---")
-
-            st.write(f"**Chunk ID:** {chunk['chunk_id']}")
-            st.write(f"**Source File:** {chunk['source_file']}")
-            st.write(f"**Character Count:** {chunk['char_count']}")
-
-            st.text_area(
-                label=f"Chunk {chunk['chunk_id']}",
-                value=chunk["text"],
-                height=200,
-            )
-
